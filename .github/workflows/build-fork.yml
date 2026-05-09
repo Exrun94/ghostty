@@ -1,0 +1,83 @@
+name: Build Fork (macOS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref / branch / SHA to build"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Xcode Select
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+
+      - name: Xcode Version
+        run: xcodebuild -version
+
+      - name: Install Zig
+        run: |
+          ZIG_VERSION=0.15.2
+          curl -LO "https://ziglang.org/download/${ZIG_VERSION}/zig-aarch64-macos-${ZIG_VERSION}.tar.xz"
+          tar -xf "zig-aarch64-macos-${ZIG_VERSION}.tar.xz"
+          echo "$PWD/zig-aarch64-macos-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Zig Version
+        run: zig version
+
+      - name: Setup Sparkle
+        env:
+          SPARKLE_VERSION: 2.9.0
+        run: |
+          mkdir -p .action/sparkle
+          cd .action/sparkle
+          curl -L "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-for-Swift-Package-Manager.zip" > sparkle.zip
+          unzip -q sparkle.zip
+          echo "$(pwd)/bin" >> "$GITHUB_PATH"
+
+      # Build the Zig framework consumed by the Swift app (Release).
+      - name: Build GhosttyKit
+        run: zig build -Doptimize=ReleaseFast -Demit-macos-app=false
+
+      # Build the unsigned macOS app via Xcode using the existing
+      # ReleaseLocal configuration (no signing, no Team ID required).
+      - name: Build Ghostty.app
+        run: |
+          cd macos
+          xcodebuild \
+            -target Ghostty \
+            -configuration ReleaseLocal \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS=""
+
+      - name: Locate built app
+        id: locate
+        run: |
+          APP_PATH=$(find macos/build -maxdepth 4 -type d -name 'Ghostty.app' | head -n 1)
+          echo "Found: $APP_PATH"
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "app_dir=$(dirname "$APP_PATH")" >> "$GITHUB_OUTPUT"
+
+      - name: Zip app
+        run: |
+          cd "${{ steps.locate.outputs.app_dir }}"
+          zip -9 -r --symlinks "$GITHUB_WORKSPACE/Ghostty-fork.zip" Ghostty.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ghostty-${{ github.sha }}
+          path: Ghostty-fork.zip
+          retention-days: 7
