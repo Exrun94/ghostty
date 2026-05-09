@@ -26,11 +26,14 @@ enum QuickTerminalSpaceBehavior {
 
         switch self {
         case .move:
-            // We want this to move the window to the active space.
-            return NSWindow.CollectionBehavior([.canJoinAllSpaces] + commonBehavior)
-        case .remain:
-            // We want this to remain the window in the current space.
+            // Follow the active space: when the quick terminal is shown,
+            // macOS relocates the window to whichever space is currently active.
             return NSWindow.CollectionBehavior([.moveToActiveSpace] + commonBehavior)
+        case .remain:
+            // Stay in the space where the window was originally created.
+            // We intentionally do NOT set .canJoinAllSpaces or
+            // .moveToActiveSpace here so the window stays put.
+            return NSWindow.CollectionBehavior(commonBehavior)
         }
     }
 }
